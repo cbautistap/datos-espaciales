@@ -1,0 +1,181 @@
+---
+title: "Tarea 1. Equipo 2"
+author: "Carlos Bautista 125761, Edgar Bazo 172061, Emmanuel Rosales 182435"
+date: "2023-01-14"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+library(jsonlite)
+library(curl)
+library(osmdata)
+library(tidyverse)
+library(sf)
+```
+
+## I. Fuente: INEGI
+
+**1. Descargar datos de restaurantes de las colonias de la Zona Condesa.**
+
+Se definen las coordenadas de zona condesa (con base en google maps) y se define
+un radio de 1200 metros
+
+```{r}
+url_denue <- "https://www.inegi.org.mx/app/api/denue/v1/consulta/Buscar/restaurantes/19.410882,-99.174045/1200/8927e87a-04a3-4673-9cfa-4dfc09045657"
+data_denue <- fromJSON(url_denue)
+```
+
+**2.a ¿Cuántos restaurantes encontraste en cada fuente?**
+
+Dado el polígono que definimos para las colonias de la zona Condesa, el DENUE 
+registra 376 restaurantes
+
+```{r}
+# filtro para solo traer colonias condesa, hipodromo e hipodromo condesa
+df_condesa <- data_denue %>% filter(grepl('HIP|CON', Colonia))
+nrow(df_condesa)
+```
+
+**2.b ¿Qué campos puedes conocer sobre cada restaurante?**
+
+Los campos que se pueden conocer para los restaurantes de la zona Condesa
+son los siguientes:
+
+```{r}
+colnames(df_condesa)
+```
+**2.c Taquerías en la zona Condesa**
+
+De acuerdo con el DENUE, en la condesa existen 27 taquerías. Dado que es una base de 
+registros de unidades económicas, es posible que diversas taquerías informales
+(puestos, etc.) no estén capturadas.
+
+```{r}
+taquerias_denue <- df_condesa %>% filter(grepl('TAQUE|TACO', Nombre))
+nrow(taquerias_denue)
+```
+
+
+**2.d Dirección exacta de cada lugar**
+(calle, número, colonia, cp,  alcaldía, estado)
+
+Se genera vector que contiene la dirección exacta de los 376 restaurantes
+en la zona Condesa
+
+```{r}
+#"Calle" "Num_Exterior" "Num_Interior" "Colonia" "CP"
+dir_denue <- df_condesa %>% select(Calle, Num_Exterior, Num_Interior, Colonia,
+                               CP)
+
+dir_denue_nona <- dir_denue %>% 
+  mutate(dir_completa = str_c(Calle, Num_Exterior, Num_Interior, Colonia, CP,
+                              sep = ', ')) %>% na.omit()
+# se muestran las primeras diez registros
+dir_denue_nona$dir_completa[1:10]
+# Total de registros completos
+length(dir_denue_nona$dir_completa)
+```
+
+
+
+## II. Fuente: Open Street Maps (OSM)
+
+**1. Descargar datos de restaurantes de las colonias de la Zona Condesa.**
+
+Definimos perímetro de Zona Condesa con base en coordenadas de Google Maps.
+
+```{r cars}
+# Perímetro Condesa
+bbox = c(left = -99.18, bottom = 19.40,
+         right = -99.13, top = 19.42)
+
+# Descargamos datos
+condesa <- opq(bbox) %>% 
+  add_osm_feature(key = 'amenity', value = 'restaurant') %>% 
+  osmdata_sf()
+```
+
+**2.a ¿Cuántos restaurantes encontraste en cada fuente?**
+
+Dado el polígono que definimos para las colonias de la zona Condesa, OSM tiene
+registrados 360 restaurantes
+
+```{r}
+rest <- condesa$osm_points
+attach(rest)
+num_rest <- nrow(rest)
+print(num_rest)
+```
+
+**2.b ¿Qué campos puedes conocer sobre cada restaurante?**
+
+Los campos que se pueden conocer para los restaurantes de la zona Condesa
+son los siguientes:
+
+```{r}
+colnames(rest)
+```
+**2.c Taquerías en la zona Condesa**
+
+De acuerdo con OSM, en la condesa existen 16 taquerías. Al igual que en el caso 
+del DENUE, esta es la cifra de registros.
+
+```{r}
+#head(rest)
+taquerias <- rest %>% filter(grepl('Taq|Tac', name))
+#head(taquerias)
+nrow(taquerias)
+```
+
+
+**2.d Dirección exacta de cada lugar**
+(calle, número, colonia, cp,  alcaldía, estado)
+
+Se genera vector que contiene la dirección exacta de los restaurantes
+en la zona Condesa con OMS. Sin embargo, no existen registros para muchos campos
+de dirección, para muchas observaciones, de tal forma que solo se puede obtener
+la dirección completa para 5 restaurantes (de 360)
+
+```{r}
+direcciones <- rest %>% select(osm_id, name, addr.street, addr.housenumber,
+                               addr.postcode, addr.city)
+
+direcciones_nona <- direcciones %>% mutate(dir_completa = str_c(addr.street, addr.housename, addr.postcode,
+                                           addr.city, sep = ', ')) %>% na.omit()
+direcciones_nona$dir_completa
+```
+
+```{r}
+write_csv(x=rest, file ='data/restaurantes_condesa_osm.csv')
+write_csv(x=df_condesa, file = 'data/restaurantes_condesa_denue.csv')
+```
+
+
+**2.e Si tuvieras que elegir entre una de las fuentes para hacer un estudio de
+mercado, ¿cuál escogerías, porqué?**
+
+Se utilizaría el DENUE porque, en este caso específico, tiene información más
+completa. Esto se debe a que la fuente proviene de un organismo público nacional
+que tiene el mandato de generar información, mientras que OSM es un esfuerzo 
+voluntario (y global) que por lo tanto puede no actualizarse con tanta frecuencia.
+
+Si bien el número de restaurantes registrados en la zona Condesa es muy similar
+en ambas fuentes (376 DENUE vs 360 OSM), se observó que los campos en OSM están
+incompletos. Cuando se obtuvo la dirección exacta de cada restaurante en DENUE se
+logró para los 376 establecimientos, mientras que en OSM para solo 5.
+
+Sin embargo, es importante resaltar que la información que se podría acceder en 
+OSM es más extensa, ya que cuenta con variables como 'capacidad', 'delivery', 
+'cuisine', entre otras. Por lo que, de contar con información completa, sería una 
+fuente más atractiva. Este podría ser el caso de otros países, por ejemplo EUA.
+
+**2.f ¿Podrías determinar en qué AGEB se encuentra cada restaurante?**
+Esto sería posible para los datos obtenidos con el DENUE (dado que AGEB es
+una medida de INEGI). A través de la API haciendo el 'query' mediante área y
+actividad económica se puede obtener el AGEB.
